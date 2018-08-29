@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -312,14 +312,14 @@ func (sc *scrapeContext) downloadFileMaybe(post *post, rawurl string, priority i
 	sc.sema.Acquire(priority)
 	defer sc.sema.Release()
 
-	filepath := path.Join(sc.blogConfig.Target, path.Base(rawurl))
-	tempFilepath := filepath + ".tmp"
+	path := filepath.Join(sc.blogConfig.Target, filepath.Base(rawurl))
+	tempPath := path + ".tmp"
 	fileTime := post.timestamp()
 
 	// File already exists --> nothing to do here.
-	_, err = os.Lstat(filepath)
+	_, err = os.Lstat(path)
 	if err == nil {
-		log.Printf("%s: skipping %s", sc.blogConfig.Name, filepath)
+		log.Printf("%s: skipping %s", sc.blogConfig.Name, path)
 		return nil
 	}
 
@@ -327,10 +327,10 @@ func (sc *scrapeContext) downloadFileMaybe(post *post, rawurl string, priority i
 	// A blog can contain the same image link multiple times.
 	// If such a duplicate link is encountered while we're still writing into the .tmp-file,
 	// this will corrupt the original content and make the os.Rename() operation fail spuriously.
-	if !acquireTempFile(tempFilepath) {
+	if !acquireTempFile(tempPath) {
 		return nil
 	}
-	defer releaseTempFile(tempFilepath)
+	defer releaseTempFile(tempPath)
 
 	res, err := sc.doGetRequest(u, nil)
 	if err != nil {
@@ -346,13 +346,13 @@ func (sc *scrapeContext) downloadFileMaybe(post *post, rawurl string, priority i
 		// still be linked inside the posts but result in a "403 Forbidden" error.
 		return nil
 	case http.StatusNotFound:
-		log.Printf("%s: did not find %s", sc.blogConfig.Name, filepath)
+		log.Printf("%s: did not find %s", sc.blogConfig.Name, path)
 		return errFileNotFound
 	default:
 		return fmt.Errorf("GET %s failed with: %d %s", rawurl, res.StatusCode, res.Status)
 	}
 
-	tempFile, err := os.OpenFile(tempFilepath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	tempFile, err := os.OpenFile(tempPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return err
 	}
@@ -369,17 +369,17 @@ func (sc *scrapeContext) downloadFileMaybe(post *post, rawurl string, priority i
 		return err
 	}
 
-	err = os.Chtimes(tempFilepath, fileTime, fileTime)
+	err = os.Chtimes(tempPath, fileTime, fileTime)
 	if err != nil {
 		return err
 	}
 
-	err = os.Rename(tempFilepath, filepath)
+	err = os.Rename(tempPath, path)
 	if err != nil {
 		return err
 	}
 
-	log.Printf("%s: wrote %s", sc.blogConfig.Name, filepath)
+	log.Printf("%s: wrote %s", sc.blogConfig.Name, path)
 	return nil
 }
 
