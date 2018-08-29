@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -33,6 +34,23 @@ var (
 	inlineMediaRegexp    = regexp.MustCompile(`http[^"]+(?:media|vtt)\.tumblr\.com/[^"]+`)
 	skippableURLs        = regexp.MustCompile(`media\.tumblr\.com/avatar_`)
 )
+
+func init() {
+	for _, e := range []struct{ typ, ext string }{
+		{"image/bmp", ".bmp"},
+		{"image/gif", ".gif"},
+		{"image/jpeg", ".jpg"},
+		{"image/png", ".png"},
+		{"image/tiff", ".tiff"},
+		{"image/webp", ".webp"},
+		{"video/webm", ".webm"},
+	} {
+		err := mime.AddExtensionType(e.ext, e.typ)
+		if err != nil {
+			panic(err)
+		}
+	}
+}
 
 type Scraper struct {
 	client   *http.Client
@@ -313,7 +331,6 @@ func (sc *scrapeContext) downloadFileMaybe(post *post, rawurl string, priority i
 	defer sc.sema.Release()
 
 	path := filepath.Join(sc.blogConfig.Target, filepath.Base(rawurl))
-	tempPath := path + ".tmp"
 	fileTime := post.timestamp()
 
 	// File already exists --> nothing to do here.
@@ -322,15 +339,6 @@ func (sc *scrapeContext) downloadFileMaybe(post *post, rawurl string, priority i
 		log.Printf("%s: skipping %s", sc.blogConfig.Name, path)
 		return nil
 	}
-
-	// Prevent concurrent writes into the temporary file.
-	// A blog can contain the same image link multiple times.
-	// If such a duplicate link is encountered while we're still writing into the .tmp-file,
-	// this will corrupt the original content and make the os.Rename() operation fail spuriously.
-	if !acquireTempFile(tempPath) {
-		return nil
-	}
-	defer releaseTempFile(tempPath)
 
 	res, err := sc.doGetRequest(u, nil)
 	if err != nil {
@@ -351,6 +359,28 @@ func (sc *scrapeContext) downloadFileMaybe(post *post, rawurl string, priority i
 	default:
 		return fmt.Errorf("GET %s failed with: %d %s", rawurl, res.StatusCode, res.Status)
 	}
+
+	fixedPath := sc.fixupFilepath(res, path)
+	if fixedPath != path {
+		path = fixedPath
+
+		// Same as above: File already exists --> nothing to do here.
+		_, err = os.Lstat(path)
+		if err == nil {
+			log.Printf("%s: skipping %s", sc.blogConfig.Name, path)
+			return nil
+		}
+	}
+
+	// Prevent concurrent writes into the temporary file.
+	// A blog can contain the same image link multiple times.
+	// If such a duplicate link is encountered while we're still writing into the .tmp-file,
+	// this will corrupt the original content and make the os.Rename() operation fail spuriously.
+	tempPath := path + ".tmp"
+	if !acquireTempFile(tempPath) {
+		return nil
+	}
+	defer releaseTempFile(tempPath)
 
 	tempFile, err := os.OpenFile(tempPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
@@ -447,4 +477,38 @@ func (sc *scrapeContext) fixupURL(url string) string {
 	}
 
 	return imageSizeFixupRegexp.ReplaceAllString(url, "_1280.$1")
+}
+
+// Tumblr suffixes some files with an invalid extension, like .gifv for instance.
+// The response then includes an Content-Disposition header with the actual, supposed "filename".
+// Furthermore a Content-Type header is sent with a MIME type which we use as a fallback.
+func (sc *scrapeContext) fixupFilepath(res *http.Response, path string) string {
+	// The Content-Disposition header can include a "filename" a browser is supposed to use to name the downloaded file.
+	_, contentDispositionParams, _ := mime.ParseMediaType(res.Header.Get("Content-Disposition"))
+	if contentDispositionParams != nil {
+		filename := contentDispositionParams["filename"]
+		if len(filename) != 0 {
+			return filepath.Join(sc.blogConfig.Target, filename)
+		}
+	}
+
+	exts, _ := mime.ExtensionsByType(res.Header.Get("Content-Type"))
+	if len(exts) != 0 {
+		dir, file := filepath.Split(path)
+		curExt := filepath.Ext(file)
+
+		for _, ext := range exts {
+			if ext == curExt {
+				// There's nothing we need to do if one of the extensions suggested
+				// by the Content-Type already matches what we use for "path".
+				return path
+			}
+		}
+
+		basename := strings.TrimSuffix(file, curExt)
+		file = basename + exts[0]
+		return filepath.Join(dir, file)
+	}
+
+	return path
 }
