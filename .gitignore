@@ -1,0 +1,26 @@
+# Linux
+*~
+
+# OSX
+._*
+*.DS_Store
+
+# Windows
+Desktop.ini
+Thumbs.db
+
+# Go
+*.exe
+*.out
+*.test
+
+# Visual Studio Code
+/.vscode
+
+# JetBrains
+/.idea
+
+# Project specific
+/vendor
+tumblr-scraper*
+tumblr.db

@@ -1,0 +1,11 @@
+api_key = "Insert the 'OAuth Consumer Key' retrieved from https://www.tumblr.com/oauth/register here"
+concurrency = 10
+
+[[blogs]]
+name = "my-tumblr-blog-name"
+target = "path/to/output/directory"
+
+[[blogs]]
+name = "my-other-tumblr-blog-name"
+target = "path/to/my/other/output/directory"
+ignore_reblogs = true
