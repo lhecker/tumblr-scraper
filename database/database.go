@@ -1,9 +1,7 @@
 package database
 
 import (
-	"log"
 	"strconv"
-	"strings"
 
 	"github.com/coreos/bbolt"
 )
@@ -14,48 +12,28 @@ var (
 
 type Database bolt.DB
 
-func NewDatabase() *Database {
+func NewDatabase() (*Database, error) {
 	db, err := bolt.Open("tumblr.db", 0644, nil)
 	if err != nil {
-		log.Panic(err)
+		return nil, err
 	}
 
 	err = db.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists(highestIDBucket)
-		if err != nil {
-			return err
-		}
-
-		// Migrate existing entries over to the new blog-identifier format
-		// TODO: remove this
-		b.ForEach(func(k, v []byte) error {
-			sk := string(k)
-
-			if !strings.ContainsRune(sk, '.') {
-				b.Put([]byte(sk+".tumblr.com"), v)
-				b.Delete(k)
-			}
-
-			return nil
-		})
-
-		return nil
+		_, err := tx.CreateBucketIfNotExists(highestIDBucket)
+		return err
 	})
 	if err != nil {
-		log.Panic(err)
+		return nil, err
 	}
 
-	return (*Database)(db)
+	return (*Database)(db), nil
 }
 
-func (s *Database) Close() {
-	err := s.get().Close()
-	if err != nil {
-		log.Panic(err)
-	}
+func (s *Database) Close() error {
+	return s.get().Close()
 }
 
-func (s *Database) GetHighestID(blogName string) int64 {
+func (s *Database) GetHighestID(blogName string) (int64, error) {
 	var highestID int64
 
 	err := s.get().View(func(tx *bolt.Tx) error {
@@ -69,20 +47,17 @@ func (s *Database) GetHighestID(blogName string) int64 {
 		return err
 	})
 	if err != nil {
-		log.Panic(err)
+		return 0, err
 	}
 
-	return highestID
+	return highestID, nil
 }
 
-func (s *Database) SetHighestID(blogName string, highestID int64) {
-	err := s.get().Update(func(tx *bolt.Tx) error {
+func (s *Database) SetHighestID(blogName string, highestID int64) error {
+	return s.get().Update(func(tx *bolt.Tx) error {
 		s := strconv.FormatInt(highestID, 10)
 		return tx.Bucket(highestIDBucket).Put([]byte(blogName), []byte(s))
 	})
-	if err != nil {
-		log.Panic(err)
-	}
 }
 
 func (s *Database) get() *bolt.DB {

@@ -87,7 +87,10 @@ func (s *Scraper) Scrape(ctx context.Context, blogConfig *config.BlogConfig) (in
 		sema: semaphore.NewPrioritySemaphore(s.config.Concurrency),
 	}
 	if !blogConfig.Rescrape {
-		sc.highestID = s.database.GetHighestID(blogConfig.Name)
+		sc.highestID, err = s.database.GetHighestID(blogConfig.Name)
+		if err != nil {
+			return 0, err
+		}
 	}
 	if !blogConfig.Before.IsZero() {
 		sc.before = blogConfig.Before
