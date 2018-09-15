@@ -21,27 +21,36 @@ import (
 
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
 		os.Exit(1)
 	}
 }
 
 var (
 	configFile string
+	silent     bool
 
 	rootCmd = &cobra.Command{
-		Use:               "tumblr-scraper",
-		Short:             "A crawler and scraper for Tumblr",
-		PersistentPreRunE: rootPersistentPreRunE,
-		PersistentPostRun: rootPersistentPostRun,
+		Use:   "tumblr-scraper",
+		Short: "A crawler and scraper for Tumblr",
 	}
 )
 
 func init() {
+	// By setting these members here we break an initialization loop between rootCmd (C) and rootPersistentPreRunE (R):
+	// Otherwise C refers to R which in turn refers back to C, in the implementation of the silent flag.
+	rootCmd.PersistentPreRunE = rootPersistentPreRunE
+	rootCmd.PersistentPostRun = rootPersistentPostRun
+
 	rootCmd.PersistentFlags().StringVarP(&configFile, "config", "c", "", `config file`)
+	rootCmd.PersistentFlags().BoolVarP(&silent, "silent", "s", false, `Silent or quiet mode`)
 }
 
 func rootPersistentPreRunE(cmd *cobra.Command, args []string) error {
+	if silent {
+		rootCmd.SilenceErrors = true
+		rootCmd.SilenceUsage = true
+	}
+
 	for _, f := range []func() error{
 		initHTTPClient,
 		initConfig,
