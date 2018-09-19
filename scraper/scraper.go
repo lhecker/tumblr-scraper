@@ -369,6 +369,16 @@ func (sc *scrapeContext) downloadFileMaybe(post *post, rawurl string, priority i
 		return fmt.Errorf("GET %s failed with: %d %s", rawurl, res.StatusCode, res.Status)
 	}
 
+	lastModifiedString := res.Header.Get("Last-Modified")
+	if len(lastModifiedString) != 0 {
+		lastModified, err := time.Parse(time.RFC1123, lastModifiedString)
+		if err != nil {
+			log.Printf("%s: failed to parse Last-Modified header: %v", err)
+		} else if fileTime.Sub(lastModified) > 24*time.Hour {
+			fileTime = lastModified
+		}
+	}
+
 	fixedPath := sc.fixupFilepath(res, path)
 	if fixedPath != path {
 		path = fixedPath
