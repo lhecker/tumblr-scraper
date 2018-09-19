@@ -1,7 +1,6 @@
 package scraper
 
 import (
-	"encoding/json"
 	"time"
 )
 
@@ -32,7 +31,7 @@ type post struct {
 	Answer string `json:"answer"`
 
 	// Only defined for reblogs
-	RebloggedFromID json.Number `json:"reblogged_from_id"`
+	RebloggedRootUUID string `json:"reblogged_root_uuid"`
 }
 
 func (s *post) timestamp() time.Time {

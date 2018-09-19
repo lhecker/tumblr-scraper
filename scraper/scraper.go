@@ -192,7 +192,7 @@ func (sc *scrapeContext) Scrape() (err error) {
 				return
 			}
 
-			if sc.blogConfig.IgnoreReblogs && len(post.RebloggedFromID) != 0 {
+			if sc.isReblog(post) {
 				continue
 			}
 
@@ -201,6 +201,12 @@ func (sc *scrapeContext) Scrape() (err error) {
 
 		sc.offset += len(data.Response.Posts)
 	}
+}
+
+func (sc *scrapeContext) isReblog(post *post) bool {
+	return sc.blogConfig.IgnoreReblogs &&
+		len(post.RebloggedRootUUID) != 0 &&
+		post.RebloggedRootUUID != sc.blogConfig.Name
 }
 
 func (sc *scrapeContext) scrapeBlog() (data *postsResponse, err error) {
