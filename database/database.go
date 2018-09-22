@@ -3,22 +3,22 @@ package database
 import (
 	"strconv"
 
-	"github.com/coreos/bbolt"
+	"go.etcd.io/bbolt"
 )
 
 var (
 	highestIDBucket = []byte("highest_id")
 )
 
-type Database bolt.DB
+type Database bbolt.DB
 
 func NewDatabase() (*Database, error) {
-	db, err := bolt.Open("tumblr.db", 0644, nil)
+	db, err := bbolt.Open("tumblr.db", 0644, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	err = db.Update(func(tx *bolt.Tx) error {
+	err = db.Update(func(tx *bbolt.Tx) error {
 		_, err := tx.CreateBucketIfNotExists(highestIDBucket)
 		return err
 	})
@@ -36,7 +36,7 @@ func (s *Database) Close() error {
 func (s *Database) GetHighestID(blogName string) (int64, error) {
 	var highestID int64
 
-	err := s.get().View(func(tx *bolt.Tx) error {
+	err := s.get().View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(highestIDBucket).Get([]byte(blogName))
 		if b == nil {
 			return nil
@@ -54,12 +54,12 @@ func (s *Database) GetHighestID(blogName string) (int64, error) {
 }
 
 func (s *Database) SetHighestID(blogName string, highestID int64) error {
-	return s.get().Update(func(tx *bolt.Tx) error {
+	return s.get().Update(func(tx *bbolt.Tx) error {
 		s := strconv.FormatInt(highestID, 10)
 		return tx.Bucket(highestIDBucket).Put([]byte(blogName), []byte(s))
 	})
 }
 
-func (s *Database) get() *bolt.DB {
-	return (*bolt.DB)(s)
+func (s *Database) get() *bbolt.DB {
+	return (*bbolt.DB)(s)
 }

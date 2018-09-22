@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/lhecker/tumblr-scraper/account"
@@ -31,8 +33,9 @@ var (
 
 	videoURLFixupRegexp  = regexp.MustCompile(`_(?:480|720)\.mp4$`)
 	imageSizeFixupRegexp = regexp.MustCompile(`_(?:\d+)\.([a-z]+)$`)
-	inlineMediaRegexp    = regexp.MustCompile(`http[^"]+(?:media|vtt)\.tumblr\.com/[^"]+`)
-	skippableURLs        = regexp.MustCompile(`media\.tumblr\.com/avatar_`)
+
+	mediaURLRegexp     = regexp.MustCompile(`^http.+(?:media|vtt)\.tumblr\.com/.+$`)
+	htmlMediaURLRegexp = regexp.MustCompile(`http[^"]+(?:media|vtt)\.tumblr\.com/[^"]+`)
 )
 
 func init() {
@@ -373,15 +376,7 @@ func (sc *scrapeContext) scrapeBlogMaybe() (*postsResponse, error) {
 
 func (sc *scrapeContext) scrapePost(post *post) {
 	for _, text := range []string{post.Body, post.Answer} {
-		if len(text) == 0 {
-			continue
-		}
-
-		for _, u := range inlineMediaRegexp.FindAllString(text, -1) {
-			if !sc.shouldURLBeSkipped(u) {
-				sc.downloadFileAsync(post, u)
-			}
-		}
+		sc.scrapePostBody(post, text)
 	}
 
 	for _, photo := range post.Photos {
@@ -390,6 +385,51 @@ func (sc *scrapeContext) scrapePost(post *post) {
 
 	if len(post.VideoURL) != 0 {
 		sc.downloadFileAsync(post, post.VideoURL)
+	}
+}
+
+func (sc *scrapeContext) scrapePostBody(post *post, text string) {
+	if len(text) == 0 {
+		return
+	}
+
+	nodes, err := html.ParseFragment(strings.NewReader(text), &html.Node{
+		Type:     html.ElementNode,
+		DataAtom: atom.Div,
+		Data:     "div",
+	})
+	if err != nil {
+		log.Printf("%s: failed to parse body - falling back to regexp: %v", sc.blogConfig.Name, err)
+		sc.scrapePostBodyUsingSearch(post, text)
+		return
+	}
+
+	for len(nodes) != 0 {
+		node := nodes[len(nodes)-1]
+		nodes = nodes[0 : len(nodes)-1]
+
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			nodes = append(nodes, child)
+		}
+
+		if node.Type != html.ElementNode {
+			continue
+		}
+
+		for _, attr := range node.Attr {
+			switch attr.Key {
+			case "href", "src":
+				if mediaURLRegexp.MatchString(attr.Val) {
+					sc.downloadFileAsync(post, attr.Val)
+				}
+			}
+		}
+	}
+}
+
+func (sc *scrapeContext) scrapePostBodyUsingSearch(post *post, text string) {
+	for _, u := range htmlMediaURLRegexp.FindAllString(text, -1) {
+		sc.downloadFileAsync(post, u)
 	}
 }
 
@@ -576,13 +616,6 @@ func (sc *scrapeContext) doGetRequest(url *url.URL, header http.Header) (*http.R
 	}
 	req = req.WithContext(sc.ctx)
 	return sc.scraper.client.Do(req)
-}
-
-// There seems to be a migration fuckup on Tumblr's side for posts pre-2014,
-// where some inline images are replaced with the quoted poster's avatar.
-// --> Filter those out.
-func (sc *scrapeContext) shouldURLBeSkipped(url string) bool {
-	return skippableURLs.MatchString(url)
 }
 
 func (sc *scrapeContext) fixupURL(url string) string {
