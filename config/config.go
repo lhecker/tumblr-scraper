@@ -16,15 +16,35 @@ type Config struct {
 	Password    string `toml:"password"`
 }
 
+func (s *Config) Fixup() {
+	if s.Concurrency <= 0 {
+		s.Concurrency = 24
+	}
+
+	for _, blog := range s.Blogs {
+		blog.Fixup()
+	}
+}
+
 type BlogConfig struct {
 	// Required
 	Name   string `toml:"name"`
 	Target string `toml:"target"`
 
 	// Optional
-	IgnoreReblogs bool      `toml:"ignore_reblogs"`
-	Rescrape      bool      `toml:"rescrape"`
-	Before        time.Time `toml:"before"`
+	AllowReblogsFrom *[]string `toml:"allow_reblogs_from"`
+	Rescrape         bool      `toml:"rescrape"`
+	Before           time.Time `toml:"before"`
+}
+
+func (s *BlogConfig) Fixup() {
+	s.Name = TumblrNameToUUID(s.Name)
+
+	if s.AllowReblogsFrom != nil {
+		for idx, from := range *s.AllowReblogsFrom {
+			(*s.AllowReblogsFrom)[idx] = TumblrNameToUUID(from)
+		}
+	}
 }
 
 func TumblrUUIDToName(uuid string) string {

@@ -73,27 +73,10 @@ func (s *Scraper) Scrape(ctx context.Context, blogConfig *config.BlogConfig) (in
 	}
 
 	eg, ctx := errgroup.WithContext(ctx)
-	sc := &scrapeContext{
-		scraper:    s,
-		blogConfig: blogConfig,
-		errgroup:   eg,
-		ctx:        ctx,
 
-		state: scrapeContextStateTryUseAPI,
-
-		lowestID:  math.MaxInt64,
-		highestID: math.MinInt64,
-
-		sema: semaphore.NewPrioritySemaphore(s.config.Concurrency),
-	}
-	if !blogConfig.Rescrape {
-		sc.highestID, err = s.database.GetHighestID(blogConfig.Name)
-		if err != nil {
-			return 0, err
-		}
-	}
-	if !blogConfig.Before.IsZero() {
-		sc.before = blogConfig.Before
+	sc, err := newScrapeContext(s, blogConfig, eg, ctx)
+	if err != nil {
+		return 0, err
 	}
 
 	err = sc.Scrape()
@@ -131,7 +114,54 @@ type scrapeContext struct {
 	highestID int64
 
 	// Other private members
-	sema *semaphore.PrioritySemaphore
+	sema         *semaphore.PrioritySemaphore
+	allowedBlogs map[string]struct{}
+}
+
+func newScrapeContext(
+	s *Scraper,
+	blogConfig *config.BlogConfig,
+	eg *errgroup.Group,
+	ctx context.Context,
+) (*scrapeContext, error) {
+	var err error
+
+	sc := &scrapeContext{
+		scraper:    s,
+		blogConfig: blogConfig,
+		errgroup:   eg,
+		ctx:        ctx,
+
+		state: scrapeContextStateTryUseAPI,
+
+		lowestID:  math.MaxInt64,
+		highestID: math.MinInt64,
+
+		sema: semaphore.NewPrioritySemaphore(s.config.Concurrency),
+	}
+
+	if !blogConfig.Rescrape {
+		sc.highestID, err = s.database.GetHighestID(blogConfig.Name)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if !blogConfig.Before.IsZero() {
+		sc.before = blogConfig.Before
+	}
+
+	if blogConfig.AllowReblogsFrom != nil {
+		sc.allowedBlogs = map[string]struct{}{
+			blogConfig.Name: {},
+		}
+
+		for _, from := range *blogConfig.AllowReblogsFrom {
+			sc.allowedBlogs[from] = struct{}{}
+		}
+	}
+
+	return sc, nil
 }
 
 func (sc *scrapeContext) Scrape() (err error) {
@@ -192,7 +222,7 @@ func (sc *scrapeContext) Scrape() (err error) {
 				return
 			}
 
-			if sc.handleReblogs(post) {
+			if !sc.handleReblogs(post) {
 				continue
 			}
 
@@ -203,26 +233,29 @@ func (sc *scrapeContext) Scrape() (err error) {
 	}
 }
 
-// Returns true if the post is a reblog
+// Returns true if the post is ok to be scraped
 func (sc *scrapeContext) handleReblogs(post *post) bool {
-	if !sc.blogConfig.IgnoreReblogs {
-		return false
+	if sc.allowedBlogs == nil {
+		return true
 	}
 
-	if len(post.Trail) != 0 {
-		return sc.handleReblogsWithTrail(post)
-	}
+	// In case a blog is renamed from A -> B, then
+	//   .Trail[0].Blog.Name == "A"
+	// (with .Trail[0] being the .IsRootItem), but
+	//   .RebloggedRootUUID == "B"
+	//
+	// => *Always* use .RebloggedRootUUID as a fallback to decide whether this is really-really a reblog.
 
 	if len(post.RebloggedRootUUID) != 0 {
-		return post.RebloggedRootUUID != sc.blogConfig.Name
+		sc.filterReblogsFromBody(post)
+		return sc.isBlogAllowed(post.RebloggedRootUUID)
 	}
 
-	return false
+	return sc.handleReblogsUsingTrail(post)
 }
 
-// Returns true if the post is a reblog
-func (sc *scrapeContext) handleReblogsWithTrail(post *post) bool {
-	if len(post.Trail) == 1 {
+func (sc *scrapeContext) handleReblogsUsingTrail(post *post) bool {
+	if len(post.Trail) == 0 {
 		return true
 	}
 
@@ -235,27 +268,40 @@ func (sc *scrapeContext) handleReblogsWithTrail(post *post) bool {
 		}
 	}
 
-	if config.TumblrNameToUUID(root.Blog.Name) != sc.blogConfig.Name {
-		return true
+	if !sc.isBlogAllowed(config.TumblrNameToUUID(root.Blog.Name)) {
+		return false
+	}
+
+	sc.filterReblogsFromBody(post)
+	return true
+}
+
+// Patches the post body to only include posts from our bloggers of interest
+func (sc *scrapeContext) filterReblogsFromBody(post *post) {
+	if len(post.Trail) < 2 {
+		return
 	}
 
 	body := strings.Builder{}
 
 	for _, entry := range post.Trail {
-		if config.TumblrNameToUUID(entry.Blog.Name) != sc.blogConfig.Name {
+		if !sc.isBlogAllowed(config.TumblrNameToUUID(entry.Blog.Name)) {
 			continue
 		}
 
 		if len(entry.ContentRaw) == 0 {
-			return false
+			return
 		}
 
 		body.WriteString(entry.ContentRaw)
 	}
 
-	// Patch the post body to only include posts from our blogger of interest
 	post.Body = body.String()
-	return false
+}
+
+func (sc *scrapeContext) isBlogAllowed(name string) bool {
+	_, ok := sc.allowedBlogs[name]
+	return ok
 }
 
 func (sc *scrapeContext) scrapeBlog() (data *postsResponse, err error) {
@@ -491,7 +537,7 @@ func (sc *scrapeContext) getAPIPostsURL() *url.URL {
 		"api_key": {sc.scraper.config.APIKey},
 		"limit":   {"20"},
 	}
-	if sc.blogConfig.IgnoreReblogs {
+	if sc.allowedBlogs != nil {
 		vals.Set("reblog_info", "1")
 	}
 	if !sc.before.IsZero() {

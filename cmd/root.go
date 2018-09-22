@@ -106,8 +106,6 @@ func initConfig() (err error) {
 		viper.AddConfigPath(".")
 	}
 
-	viper.SetDefault("concurrency", 10)
-
 	err = viper.ReadInConfig()
 	if err != nil {
 		return fmt.Errorf("failed to read config file: %v", err)
