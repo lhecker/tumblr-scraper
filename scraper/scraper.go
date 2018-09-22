@@ -192,7 +192,7 @@ func (sc *scrapeContext) Scrape() (err error) {
 				return
 			}
 
-			if sc.isReblog(post) {
+			if sc.handleReblogs(post) {
 				continue
 			}
 
@@ -203,10 +203,59 @@ func (sc *scrapeContext) Scrape() (err error) {
 	}
 }
 
-func (sc *scrapeContext) isReblog(post *post) bool {
-	return sc.blogConfig.IgnoreReblogs &&
-		len(post.RebloggedRootUUID) != 0 &&
-		post.RebloggedRootUUID != sc.blogConfig.Name
+// Returns true if the post is a reblog
+func (sc *scrapeContext) handleReblogs(post *post) bool {
+	if !sc.blogConfig.IgnoreReblogs {
+		return false
+	}
+
+	if len(post.Trail) != 0 {
+		return sc.handleReblogsWithTrail(post)
+	}
+
+	if len(post.RebloggedRootUUID) != 0 {
+		return post.RebloggedRootUUID != sc.blogConfig.Name
+	}
+
+	return false
+}
+
+// Returns true if the post is a reblog
+func (sc *scrapeContext) handleReblogsWithTrail(post *post) bool {
+	if len(post.Trail) == 1 {
+		return true
+	}
+
+	root := &post.Trail[0]
+
+	for _, entry := range post.Trail {
+		if entry.IsRootItem {
+			root = &entry
+			break
+		}
+	}
+
+	if config.TumblrNameToUUID(root.Blog.Name) != sc.blogConfig.Name {
+		return true
+	}
+
+	body := strings.Builder{}
+
+	for _, entry := range post.Trail {
+		if config.TumblrNameToUUID(entry.Blog.Name) != sc.blogConfig.Name {
+			continue
+		}
+
+		if len(entry.ContentRaw) == 0 {
+			return false
+		}
+
+		body.WriteString(entry.ContentRaw)
+	}
+
+	// Patch the post body to only include posts from our blogger of interest
+	post.Body = body.String()
+	return false
 }
 
 func (sc *scrapeContext) scrapeBlog() (data *postsResponse, err error) {
@@ -277,7 +326,7 @@ func (sc *scrapeContext) scrapeBlogMaybe() (*postsResponse, error) {
 }
 
 func (sc *scrapeContext) scrapePost(post *post) {
-	for _, text := range []string{post.PostHTML, post.Body, post.Answer} {
+	for _, text := range []string{post.Body, post.Answer} {
 		if len(text) == 0 {
 			continue
 		}
@@ -460,7 +509,7 @@ func (sc *scrapeContext) getIndashBlogPostsURL() *url.URL {
 	}
 
 	u.RawQuery = url.Values{
-		"tumblelog_name_or_id": {strings.TrimSuffix(sc.blogConfig.Name, ".tumblr.com")},
+		"tumblelog_name_or_id": {config.TumblrUUIDToName(sc.blogConfig.Name)},
 		"post_id":              {},
 		"limit":                {"20"},
 		"offset":               {strconv.Itoa(sc.offset)},

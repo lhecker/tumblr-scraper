@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/mitchellh/mapstructure"
@@ -137,9 +136,7 @@ func initConfig() (err error) {
 	}
 
 	for _, blog := range singletons.Config.Blogs {
-		if !strings.ContainsRune(blog.Name, '.') {
-			blog.Name += ".tumblr.com"
-		}
+		blog.Name = config.TumblrNameToUUID(blog.Name)
 	}
 	return
 }

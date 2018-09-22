@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"time"
 )
 
@@ -24,4 +25,15 @@ type BlogConfig struct {
 	IgnoreReblogs bool      `toml:"ignore_reblogs"`
 	Rescrape      bool      `toml:"rescrape"`
 	Before        time.Time `toml:"before"`
+}
+
+func TumblrUUIDToName(uuid string) string {
+	return strings.TrimSuffix(uuid, ".tumblr.com")
+}
+
+func TumblrNameToUUID(name string) string {
+	if strings.ContainsRune(name, '.') {
+		return name
+	}
+	return name + ".tumblr.com"
 }

@@ -20,7 +20,7 @@ var (
 
 func isContextCanceledError(err error) bool {
 	if e, ok := err.(*url.Error); ok {
-		return e.Err == context.Canceled
+		err = e.Err
 	}
 	return err == context.Canceled
 }

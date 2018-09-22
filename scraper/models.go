@@ -11,12 +11,9 @@ type postsResponse struct {
 }
 
 type post struct {
-	ID        int64  `json:"id"`
-	Type      string `json:"type"`
-	Timestamp int64  `json:"timestamp"`
-
-	// Always defined for indash_blog posts
-	PostHTML string `json:"post_html"`
+	ID        int64        `json:"id"`
+	Timestamp int64        `json:"timestamp"`
+	Trail     []trailEntry `json:"trail"`
 
 	// Only defined for text posts
 	Body string `json:"body"`
@@ -39,12 +36,19 @@ func (s *post) timestamp() time.Time {
 }
 
 type photo struct {
-	OriginalSize photoVariant   `json:"original_size"`
-	AltSizes     []photoVariant `json:"alt_sizes"`
+	OriginalSize photoVariant `json:"original_size"`
 }
 
 type photoVariant struct {
-	URL    string `json:"url"`
-	Width  int    `json:"width"`
-	Height int    `json:"height"`
+	URL string `json:"url"`
+}
+
+type trailEntry struct {
+	Blog struct {
+		Name string `json:"name"`
+	} `json:"blog"`
+	ContentRaw    string `json:"content_raw"`
+	Content       string `json:"content"`
+	IsRootItem    bool   `json:"is_root_item"`
+	IsCurrentItem bool   `json:"is_current_item"`
 }
