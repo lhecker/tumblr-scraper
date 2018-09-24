@@ -405,8 +405,12 @@ func (sc *scrapeContext) scrapePostBody(post *post, text string) {
 	}
 
 	for len(nodes) != 0 {
-		node := nodes[len(nodes)-1]
-		nodes = nodes[0 : len(nodes)-1]
+		idx := len(nodes) - 1
+
+		node := nodes[idx]
+		nodes[idx] = nil
+
+		nodes = nodes[0:idx]
 
 		for child := node.FirstChild; child != nil; child = child.NextSibling {
 			nodes = append(nodes, child)
@@ -508,7 +512,7 @@ func (sc *scrapeContext) downloadFileMaybe(post *post, rawurl string, priority i
 	if len(lastModifiedString) != 0 {
 		lastModified, err := time.Parse(time.RFC1123, lastModifiedString)
 		if err != nil {
-			log.Printf("%s: failed to parse Last-Modified header: %v", err)
+			log.Printf("%s: failed to parse Last-Modified header: %v", sc.blogConfig.Name, err)
 		} else if fileTime.Sub(lastModified) > 24*time.Hour {
 			fileTime = lastModified
 		}

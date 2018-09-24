@@ -1,8 +1,18 @@
 package config
 
 import (
+	"bytes"
+	"io/ioutil"
+	"log"
+	"os"
 	"strings"
 	"time"
+
+	"github.com/BurntSushi/toml"
+)
+
+const (
+	backupExtension = ".bak"
 )
 
 type Config struct {
@@ -16,16 +26,6 @@ type Config struct {
 	Password    string `toml:"password"`
 }
 
-func (s *Config) Fixup() {
-	if s.Concurrency <= 0 {
-		s.Concurrency = 24
-	}
-
-	for _, blog := range s.Blogs {
-		blog.Fixup()
-	}
-}
-
 type BlogConfig struct {
 	// Required
 	Name   string `toml:"name"`
@@ -37,14 +37,85 @@ type BlogConfig struct {
 	Before           time.Time `toml:"before"`
 }
 
-func (s *BlogConfig) Fixup() {
-	s.Name = TumblrNameToUUID(s.Name)
+func LoadConfigOrDefault(path string) (*Config, error) {
+	cfg, err := loadConfig(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, err
+		}
 
-	if s.AllowReblogsFrom != nil {
-		for idx, from := range *s.AllowReblogsFrom {
-			(*s.AllowReblogsFrom)[idx] = TumblrNameToUUID(from)
+		cfg, err = loadConfig(path + backupExtension)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				return nil, err
+			}
+
+			log.Print("config file not found - using default values")
+		} else {
+			log.Print("recovering backup config file")
 		}
 	}
+
+	if cfg.Concurrency <= 0 {
+		cfg.Concurrency = 24
+	}
+
+	for _, blog := range cfg.Blogs {
+		blog.Name = TumblrNameToUUID(blog.Name)
+
+		if blog.AllowReblogsFrom != nil {
+			for idx, from := range *blog.AllowReblogsFrom {
+				(*blog.AllowReblogsFrom)[idx] = TumblrNameToUUID(from)
+			}
+		}
+	}
+
+	return cfg, nil
+}
+
+func loadConfig(path string) (*Config, error) {
+	cfg := &Config{}
+
+	_, err := toml.DecodeFile(path, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+func (s *Config) Save(path string) {
+	var err error
+	defer func() {
+		if err != nil {
+			log.Printf("failed to save config: %v", err)
+		}
+	}()
+
+	data := &bytes.Buffer{}
+	err = toml.NewEncoder(data).Encode(s)
+	if err != nil {
+		return
+	}
+
+	info, err := os.Lstat(path)
+	if err != nil {
+		return
+	}
+
+	backupPath := path + backupExtension
+	err = os.Rename(path, backupPath)
+	if err != nil {
+		return
+	}
+
+	err = ioutil.WriteFile(path, data.Bytes(), info.Mode())
+	if err != nil {
+		return
+	}
+
+	err = os.Remove(backupPath)
+	return
 }
 
 func TumblrUUIDToName(uuid string) string {

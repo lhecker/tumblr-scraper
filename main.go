@@ -1,9 +1,18 @@
 package main
 
 import (
-	"github.com/lhecker/tumblr-scraper/cmd"
+	"fmt"
+	"os"
+
+	"gopkg.in/urfave/cli.v2"
+
+	"github.com/lhecker/tumblr-scraper/app"
 )
 
 func main() {
-	cmd.Execute()
+	err := app.New().Run(os.Args)
+	if err != nil {
+		fmt.Fprintln(cli.ErrWriter, err)
+		cli.OsExiter(1)
+	}
 }
