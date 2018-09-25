@@ -5,10 +5,11 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
-	"github.com/BurntSushi/toml"
+	"github.com/pelletier/go-toml"
 )
 
 const (
@@ -17,8 +18,8 @@ const (
 
 type Config struct {
 	// Required
-	APIKey string        `toml:"api_key"`
-	Blogs  []*BlogConfig `toml:"blogs"`
+	APIKey string   `toml:"api_key"`
+	Blogs  BlogList `toml:"blogs"`
 
 	// Optional
 	Concurrency int    `toml:"concurrency"`
@@ -33,9 +34,11 @@ type BlogConfig struct {
 
 	// Optional
 	AllowReblogsFrom *[]string `toml:"allow_reblogs_from"`
-	Rescrape         bool      `toml:"rescrape"`
-	Before           time.Time `toml:"before"`
+	Before           time.Time `toml:"before,omitempty"`
+	Rescrape         bool      `toml:"rescrape,omitempty"`
 }
+
+type BlogList []*BlogConfig
 
 func LoadConfigOrDefault(path string) (*Config, error) {
 	cfg, err := loadConfig(path)
@@ -60,6 +63,8 @@ func LoadConfigOrDefault(path string) (*Config, error) {
 		cfg.Concurrency = 24
 	}
 
+	sort.Stable(cfg.Blogs)
+
 	for _, blog := range cfg.Blogs {
 		blog.Name = TumblrNameToUUID(blog.Name)
 
@@ -74,9 +79,14 @@ func LoadConfigOrDefault(path string) (*Config, error) {
 }
 
 func loadConfig(path string) (*Config, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{}
 
-	_, err := toml.DecodeFile(path, cfg)
+	err = toml.NewDecoder(f).Decode(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -116,6 +126,18 @@ func (s *Config) Save(path string) {
 
 	err = os.Remove(backupPath)
 	return
+}
+
+func (s BlogList) Len() int {
+	return len(s)
+}
+
+func (s BlogList) Less(i, j int) bool {
+	return s[i].Name < s[j].Name
+}
+
+func (s BlogList) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
 }
 
 func TumblrUUIDToName(uuid string) string {
