@@ -442,23 +442,21 @@ func (sc *scrapeContext) downloadFileAsync(post *post, rawurl string) {
 		panic("missing url")
 	}
 
-	// Until the Goroutine below is executed, sc.offset might've already been incremented.
-	// => Create a snapshot here.
-	priority := sc.offset
-
+	sc.sema.Acquire(sc.offset)
 	sc.errgroup.Go(func() error {
-		return sc.downloadFile(post, rawurl, priority)
+		defer sc.sema.Release()
+		return sc.downloadFile(post, rawurl)
 	})
 }
 
-func (sc *scrapeContext) downloadFile(post *post, rawurl string, priority int) error {
+func (sc *scrapeContext) downloadFile(post *post, rawurl string) error {
 	optimalRawurl := sc.fixupURL(rawurl)
 
 	// First try to download the optimal URL (i.e. the highest resolution)
 	// and fall back to the original URL if that fails with a 404 error.
-	err := sc.downloadFileMaybe(post, optimalRawurl, priority)
+	err := sc.downloadFileMaybe(post, optimalRawurl)
 	if err == errFileNotFound && optimalRawurl != rawurl {
-		err = sc.downloadFileMaybe(post, rawurl, priority)
+		err = sc.downloadFileMaybe(post, rawurl)
 	}
 
 	// Ignore 404 errors
@@ -469,14 +467,11 @@ func (sc *scrapeContext) downloadFile(post *post, rawurl string, priority int) e
 	return err
 }
 
-func (sc *scrapeContext) downloadFileMaybe(post *post, rawurl string, priority int) error {
+func (sc *scrapeContext) downloadFileMaybe(post *post, rawurl string) error {
 	u, err := url.Parse(rawurl)
 	if err != nil {
 		return err
 	}
-
-	sc.sema.Acquire(priority)
-	defer sc.sema.Release()
 
 	path := filepath.Join(sc.blogConfig.Target, filepath.Base(rawurl))
 	fileTime := post.timestamp()

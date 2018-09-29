@@ -24,9 +24,3 @@ func (s Semaphore) Acquire() {
 func (s Semaphore) Release() {
 	<-s.waiters
 }
-
-func (s Semaphore) Do(f func() error) error {
-	s.Acquire()
-	defer s.Release()
-	return f()
-}

@@ -17,12 +17,10 @@ func NewPrioritySemaphore(capacity int) *PrioritySemaphore {
 		panic("invalid capacity")
 	}
 
-	s := &PrioritySemaphore{
+	return &PrioritySemaphore{
 		capacity: capacity,
 		waiters:  make(queue, 0),
 	}
-	heap.Init(&s.waiters)
-	return s
 }
 
 func (s *PrioritySemaphore) Acquire(priority int) {
@@ -54,12 +52,6 @@ func (s *PrioritySemaphore) Release() {
 	}
 
 	s.lock.Unlock()
-}
-
-func (s *PrioritySemaphore) Do(priority int, f func() error) error {
-	s.Acquire(priority)
-	defer s.Release()
-	return f()
 }
 
 type queueEntry struct {
