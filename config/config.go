@@ -66,11 +66,11 @@ func LoadConfigOrDefault(path string) (*Config, error) {
 	sort.Stable(cfg.Blogs)
 
 	for _, blog := range cfg.Blogs {
-		blog.Name = TumblrNameToUUID(blog.Name)
+		blog.Name = TumblrNameToDomain(blog.Name)
 
 		if blog.AllowReblogsFrom != nil {
 			for idx, from := range *blog.AllowReblogsFrom {
-				(*blog.AllowReblogsFrom)[idx] = TumblrNameToUUID(from)
+				(*blog.AllowReblogsFrom)[idx] = TumblrNameToDomain(from)
 			}
 		}
 	}
@@ -83,6 +83,7 @@ func loadConfig(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer f.Close()
 
 	cfg := &Config{}
 
@@ -103,7 +104,7 @@ func (s *Config) Save(path string) {
 	}()
 
 	data := &bytes.Buffer{}
-	err = toml.NewEncoder(data).Encode(s)
+	err = toml.NewEncoder(data).Encode(*s)
 	if err != nil {
 		return
 	}
@@ -140,11 +141,11 @@ func (s BlogList) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 
-func TumblrUUIDToName(uuid string) string {
-	return strings.TrimSuffix(uuid, ".tumblr.com")
+func TumblrDomainToName(domain string) string {
+	return strings.TrimSuffix(domain, ".tumblr.com")
 }
 
-func TumblrNameToUUID(name string) string {
+func TumblrNameToDomain(name string) string {
 	if strings.ContainsRune(name, '.') {
 		return name
 	}

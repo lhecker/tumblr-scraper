@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"math"
 	"mime"
@@ -187,8 +188,8 @@ func (sc *scrapeContext) Scrape() (err error) {
 			log.Printf("%s: fetching posts before %s", sc.blogConfig.Name, sc.before.Format("2006-01-02T15:04:05Z"))
 		}
 
-		var data *postsResponse
-		data, err = sc.scrapeBlog()
+		var res *postsResponse
+		res, err = sc.scrapeBlog()
 		if err != nil {
 			return
 		}
@@ -197,9 +198,9 @@ func (sc *scrapeContext) Scrape() (err error) {
 		// I.e. specifying `&before=1491103082` might still randomly return entries with exactly such a timestamp.
 		// => Filter out redundant entries with post IDs we already scraped in previous iterations.
 		posts := []*post(nil)
-		for idx, post := range data.Response.Posts {
+		for idx, post := range res.Response.Posts {
 			if post.ID < sc.lowestID {
-				posts = data.Response.Posts[idx:]
+				posts = res.Response.Posts[idx:]
 				break
 			}
 		}
@@ -229,10 +230,13 @@ func (sc *scrapeContext) Scrape() (err error) {
 				continue
 			}
 
-			sc.scrapePost(post)
+			err = sc.scrapePost(post)
+			if err != nil {
+				return
+			}
 		}
 
-		sc.offset += len(data.Response.Posts)
+		sc.offset += len(res.Response.Posts)
 	}
 }
 
@@ -245,23 +249,36 @@ func (sc *scrapeContext) handleReblogs(post *post) bool {
 	// In case a blog is renamed from A -> B, then
 	//   .Trail[0].Blog.Name == "A"
 	// (with .Trail[0] being the .IsRootItem), but
-	//   .RebloggedRootUUID == "B"
+	//   .RebloggedRootName == "B"
 	//
-	// => *Always* use .RebloggedRootUUID as a fallback to decide whether this is really-really a reblog.
+	// => *Always* use .RebloggedRootName as primary means to decide whether this is really-really a reblog.
+	// => Sometimes when the root blog is deleted only .RebloggedFromName is defined, so use it as a fallback.
 
-	if len(post.RebloggedRootUUID) != 0 {
-		sc.filterReblogsFromBody(post)
-		return sc.isBlogAllowed(post.RebloggedRootUUID)
+	if len(post.RebloggedRootName) != 0 {
+		return sc.handleReblogsUsingName(post, post.RebloggedRootName)
 	}
 
-	return sc.handleReblogsUsingTrail(post)
+	if len(post.Trail) != 0 {
+		return sc.handleReblogsUsingTrail(post)
+	}
+
+	if len(post.RebloggedFromName) != 0 {
+		return sc.handleReblogsUsingName(post, post.RebloggedFromName)
+	}
+
+	return true
+}
+
+func (sc *scrapeContext) handleReblogsUsingName(post *post, name string) bool {
+	if !sc.isBlogAllowed(config.TumblrNameToDomain(name)) {
+		return false
+	}
+
+	sc.filterReblogsFromBody(post)
+	return true
 }
 
 func (sc *scrapeContext) handleReblogsUsingTrail(post *post) bool {
-	if len(post.Trail) == 0 {
-		return true
-	}
-
 	root := &post.Trail[0]
 
 	for _, entry := range post.Trail {
@@ -271,7 +288,7 @@ func (sc *scrapeContext) handleReblogsUsingTrail(post *post) bool {
 		}
 	}
 
-	if !sc.isBlogAllowed(config.TumblrNameToUUID(root.Blog.Name)) {
+	if !sc.isBlogAllowed(config.TumblrNameToDomain(root.Blog.Name)) {
 		return false
 	}
 
@@ -288,7 +305,7 @@ func (sc *scrapeContext) filterReblogsFromBody(post *post) {
 	body := strings.Builder{}
 
 	for _, entry := range post.Trail {
-		if !sc.isBlogAllowed(config.TumblrNameToUUID(entry.Blog.Name)) {
+		if !sc.isBlogAllowed(config.TumblrNameToDomain(entry.Blog.Name)) {
 			continue
 		}
 
@@ -361,8 +378,13 @@ func (sc *scrapeContext) scrapeBlogMaybe() (*postsResponse, error) {
 		return nil, fmt.Errorf("GET %s failed with: %d %s", url, res.StatusCode, res.Status)
 	}
 
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return nil, err
+	}
+
 	data := &postsResponse{}
-	err = json.NewDecoder(res.Body).Decode(data)
+	err = json.Unmarshal(body, data)
 	if err != nil {
 		return nil, err
 	}
@@ -374,9 +396,22 @@ func (sc *scrapeContext) scrapeBlogMaybe() (*postsResponse, error) {
 	return data, nil
 }
 
-func (sc *scrapeContext) scrapePost(post *post) {
+func (sc *scrapeContext) scrapePost(post *post) error {
+	if len(post.Content) != 0 {
+		// See: https://www.tumblr.com/docs/npf
+		return fmt.Errorf("npf format is currently unsupported")
+	}
+
+	bodyScraped := false
 	for _, text := range []string{post.Body, post.Answer} {
-		sc.scrapePostBody(post, text)
+		if len(text) != 0 {
+			bodyScraped = true
+			sc.scrapePostBody(post, text)
+		}
+	}
+
+	if !bodyScraped && len(post.Reblog.Comment) != 0 {
+		sc.scrapePostBody(post, post.Reblog.Comment)
 	}
 
 	for _, photo := range post.Photos {
@@ -386,13 +421,11 @@ func (sc *scrapeContext) scrapePost(post *post) {
 	if len(post.VideoURL) != 0 {
 		sc.downloadFileAsync(post, post.VideoURL)
 	}
+
+	return nil
 }
 
 func (sc *scrapeContext) scrapePostBody(post *post, text string) {
-	if len(text) == 0 {
-		return
-	}
-
 	nodes, err := html.ParseFragment(strings.NewReader(text), &html.Node{
 		Type:     html.ElementNode,
 		DataAtom: atom.Div,
@@ -479,7 +512,7 @@ func (sc *scrapeContext) downloadFileMaybe(post *post, rawurl string) error {
 	// File already exists --> nothing to do here.
 	_, err = os.Lstat(path)
 	if err == nil {
-		log.Printf("%s: skipping %s", sc.blogConfig.Name, path)
+		//log.Printf("%s: skipping %s", sc.blogConfig.Name, path)
 		return nil
 	}
 
@@ -594,7 +627,7 @@ func (sc *scrapeContext) getIndashBlogPostsURL() *url.URL {
 	}
 
 	u.RawQuery = url.Values{
-		"tumblelog_name_or_id": {config.TumblrUUIDToName(sc.blogConfig.Name)},
+		"tumblelog_name_or_id": {config.TumblrDomainToName(sc.blogConfig.Name)},
 		"post_id":              {},
 		"limit":                {"20"},
 		"offset":               {strconv.Itoa(sc.offset)},

@@ -14,6 +14,7 @@ type post struct {
 	ID        int64        `json:"id"`
 	Timestamp int64        `json:"timestamp"`
 	Trail     []trailEntry `json:"trail"`
+	Content   []content    `json:"content"`
 
 	// Only defined for text posts
 	Body string `json:"body"`
@@ -28,7 +29,9 @@ type post struct {
 	Answer string `json:"answer"`
 
 	// Only defined for reblogs
-	RebloggedRootUUID string `json:"reblogged_root_uuid"`
+	RebloggedFromName string `json:"reblogged_from_name"`
+	RebloggedRootName string `json:"reblogged_root_name"`
+	Reblog            reblog `json:"reblog"`
 }
 
 func (s *post) timestamp() time.Time {
@@ -51,4 +54,11 @@ type trailEntry struct {
 	Content       string `json:"content"`
 	IsRootItem    bool   `json:"is_root_item"`
 	IsCurrentItem bool   `json:"is_current_item"`
+}
+
+type reblog struct {
+	Comment string `json:"comment"`
+}
+
+type content struct {
 }
