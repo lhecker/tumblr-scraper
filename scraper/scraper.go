@@ -258,8 +258,8 @@ func (sc *scrapeContext) handleReblogs(post *post) bool {
 		return sc.handleReblogsUsingName(post, post.RebloggedRootName)
 	}
 
-	if len(post.Trail) != 0 {
-		return sc.handleReblogsUsingTrail(post)
+	if isReblog, ok := sc.handleReblogsUsingTrail(post); ok {
+		return isReblog
 	}
 
 	if len(post.RebloggedFromName) != 0 {
@@ -278,22 +278,26 @@ func (sc *scrapeContext) handleReblogsUsingName(post *post, name string) bool {
 	return true
 }
 
-func (sc *scrapeContext) handleReblogsUsingTrail(post *post) bool {
-	root := &post.Trail[0]
+func (sc *scrapeContext) handleReblogsUsingTrail(post *post) (bool, bool) {
+	var root *trailEntry
 
 	for _, entry := range post.Trail {
-		if entry.IsRootItem {
+		if entry.IsRootItem == nil || *entry.IsRootItem {
 			root = &entry
 			break
 		}
 	}
 
+	if root == nil {
+		return false, false
+	}
+
 	if !sc.isBlogAllowed(config.TumblrNameToDomain(root.Blog.Name)) {
-		return false
+		return false, true
 	}
 
 	sc.filterReblogsFromBody(post)
-	return true
+	return true, true
 }
 
 // Patches the post body to only include posts from our bloggers of interest

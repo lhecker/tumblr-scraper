@@ -50,10 +50,8 @@ type trailEntry struct {
 	Blog struct {
 		Name string `json:"name"`
 	} `json:"blog"`
-	ContentRaw    string `json:"content_raw"`
-	Content       string `json:"content"`
-	IsRootItem    bool   `json:"is_root_item"`
-	IsCurrentItem bool   `json:"is_current_item"`
+	ContentRaw string `json:"content_raw"`
+	IsRootItem *bool  `json:"is_root_item"`
 }
 
 type reblog struct {
