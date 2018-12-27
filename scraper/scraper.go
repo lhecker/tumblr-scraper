@@ -627,10 +627,14 @@ func (sc *scrapeContext) getIndashBlogPostsURL() *url.URL {
 	}
 
 	u.RawQuery = url.Values{
-		"tumblelog_name_or_id": {config.TumblrDomainToName(sc.blogConfig.Name)},
-		"post_id":              {},
-		"limit":                {"20"},
-		"offset":               {strconv.Itoa(sc.offset)},
+		"tumblelog_name_or_id":           {config.TumblrDomainToName(sc.blogConfig.Name)},
+		"post_id":                        {""},
+		"limit":                          {"20"},
+		"offset":                         {strconv.Itoa(sc.offset)},
+		"should_bypass_safemode_forpost": {"true"},
+		"should_bypass_safemode_forblog": {"true"},
+		"should_bypass_tagfiltering":     {"true"},
+		"can_modify_safe_mode":           {"true"},
 	}.Encode()
 
 	return u
