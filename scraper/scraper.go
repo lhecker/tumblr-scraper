@@ -558,39 +558,30 @@ func (sc *scrapeContext) downloadFileMaybe(post *post, rawurl string) error {
 		}
 	}
 
-	// Prevent concurrent writes into the temporary file.
-	// A blog can contain the same image link multiple times.
-	// If such a duplicate link is encountered while we're still writing into the .tmp-file,
-	// this will corrupt the original content and make the os.Rename() operation fail spuriously.
-	tempPath := path + ".tmp"
-	if !acquireTempFile(tempPath) {
+	if !acquireFile(path) {
 		return nil
 	}
-	defer releaseTempFile(tempPath)
+	defer releaseFile(path)
 
-	tempFile, err := os.OpenFile(tempPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		return err
-	}
-	defer tempFile.Close()
-
-	_, err = io.Copy(tempFile, res.Body)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return err
 	}
 
-	err = tempFile.Close()
-	tempFile = nil
+	_, err = io.Copy(file, res.Body)
 	if err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
 		return err
 	}
 
-	err = os.Chtimes(tempPath, fileTime, fileTime)
+	err = file.Close()
 	if err != nil {
+		_ = os.Remove(path)
 		return err
 	}
 
-	err = os.Rename(tempPath, path)
+	err = os.Chtimes(path, fileTime, fileTime)
 	if err != nil {
 		return err
 	}

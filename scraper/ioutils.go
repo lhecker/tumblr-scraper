@@ -5,25 +5,25 @@ import (
 )
 
 var (
-	tempFilesLock sync.Mutex
-	tempFiles     = make(map[string]struct{})
+	lockedFilesMutex sync.Mutex
+	lockedFiles      = make(map[string]struct{})
 )
 
-func acquireTempFile(path string) bool {
-	tempFilesLock.Lock()
-	defer tempFilesLock.Unlock()
+func acquireFile(path string) bool {
+	lockedFilesMutex.Lock()
+	defer lockedFilesMutex.Unlock()
 
-	if _, ok := tempFiles[path]; ok {
+	if _, ok := lockedFiles[path]; ok {
 		return false
 	}
 
-	tempFiles[path] = struct{}{}
+	lockedFiles[path] = struct{}{}
 	return true
 }
 
-func releaseTempFile(path string) {
-	tempFilesLock.Lock()
-	defer tempFilesLock.Unlock()
+func releaseFile(path string) {
+	lockedFilesMutex.Lock()
+	defer lockedFilesMutex.Unlock()
 
-	delete(tempFiles, path)
+	delete(lockedFiles, path)
 }
