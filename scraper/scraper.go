@@ -32,6 +32,9 @@ import (
 var (
 	errFileNotFound = errors.New("file not found")
 
+	deactivatedNameSuffixLength = 20
+	deactivatedNameRegexp       = regexp.MustCompile(`.-deactivated\d{8}$`)
+
 	videoURLFixupRegexp  = regexp.MustCompile(`_(?:480|720)\.mp4$`)
 	imageSizeFixupRegexp = regexp.MustCompile(`_(?:\d+)\.([a-z]+)$`)
 
@@ -270,7 +273,12 @@ func (sc *scrapeContext) handleReblogs(post *post) bool {
 }
 
 func (sc *scrapeContext) handleReblogsUsingName(post *post, name string) bool {
-	if !sc.isBlogAllowed(config.TumblrNameToDomain(name)) {
+	if deactivatedNameRegexp.MatchString(name) {
+		name = name[0 : len(name)-deactivatedNameSuffixLength]
+	}
+
+	name = config.TumblrNameToDomain(name)
+	if !sc.isBlogAllowed(name) {
 		return false
 	}
 
