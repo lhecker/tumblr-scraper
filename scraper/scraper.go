@@ -260,11 +260,9 @@ func (sc *scrapeContext) handleReblogs(post *post) bool {
 	if len(post.RebloggedRootName) != 0 {
 		return sc.handleReblogsUsingName(post, post.RebloggedRootName)
 	}
-
-	if isReblog, ok := sc.handleReblogsUsingTrail(post); ok {
-		return isReblog
+	if isAllowed, ok := sc.handleReblogsUsingTrail(post); ok {
+		return isAllowed
 	}
-
 	if len(post.RebloggedFromName) != 0 {
 		return sc.handleReblogsUsingName(post, post.RebloggedFromName)
 	}
@@ -277,7 +275,6 @@ func (sc *scrapeContext) handleReblogsUsingName(post *post, name string) bool {
 		name = name[0 : len(name)-deactivatedNameSuffixLength]
 	}
 
-	name = config.TumblrNameToDomain(name)
 	if !sc.isBlogAllowed(name) {
 		return false
 	}
@@ -288,18 +285,15 @@ func (sc *scrapeContext) handleReblogsUsingName(post *post, name string) bool {
 
 func (sc *scrapeContext) handleReblogsUsingTrail(post *post) (bool, bool) {
 	var root *trailEntry
-
 	for _, entry := range post.Trail {
 		if entry.IsRootItem == nil || *entry.IsRootItem {
 			root = &entry
 			break
 		}
 	}
-
 	if root == nil {
 		return false, false
 	}
-
 	if !sc.isBlogAllowed(config.TumblrNameToDomain(root.Blog.Name)) {
 		return false, true
 	}
@@ -320,11 +314,9 @@ func (sc *scrapeContext) filterReblogsFromBody(post *post) {
 		if !sc.isBlogAllowed(config.TumblrNameToDomain(entry.Blog.Name)) {
 			continue
 		}
-
 		if len(entry.ContentRaw) == 0 {
 			return
 		}
-
 		body.WriteString(entry.ContentRaw)
 	}
 
@@ -332,7 +324,7 @@ func (sc *scrapeContext) filterReblogsFromBody(post *post) {
 }
 
 func (sc *scrapeContext) isBlogAllowed(name string) bool {
-	_, ok := sc.allowedBlogs[name]
+	_, ok := sc.allowedBlogs[config.TumblrNameToDomain(name)]
 	return ok
 }
 
@@ -409,10 +401,40 @@ func (sc *scrapeContext) scrapeBlogMaybe() (*postsResponse, error) {
 }
 
 func (sc *scrapeContext) scrapePost(post *post) error {
-	if len(post.Content) != 0 {
-		// See: https://www.tumblr.com/docs/npf
-		return fmt.Errorf("npf format is currently unsupported")
+	//
+	// Scraping logic for NPF posts
+	//
+
+	err := sc.scrapeNpfContent(post, post.Content)
+	if err != nil {
+		return err
 	}
+
+	for _, t := range post.Trail {
+		name := t.BrokenBlogName
+		if len(t.Blog.Name) != 0 {
+			name = t.Blog.Name
+		}
+
+		if !sc.isBlogAllowed(name) {
+			continue
+		}
+
+		var cs []content
+		err = json.Unmarshal(t.Content, &cs)
+		if err != nil {
+			continue
+		}
+
+		err = sc.scrapeNpfContent(post, cs)
+		if err != nil {
+			return err
+		}
+	}
+
+	//
+	// Scraping logic for indash posts
+	//
 
 	bodyScraped := false
 	for _, text := range []string{post.Body, post.Answer} {
@@ -421,7 +443,6 @@ func (sc *scrapeContext) scrapePost(post *post) error {
 			sc.scrapePostBody(post, text)
 		}
 	}
-
 	if !bodyScraped && len(post.Reblog.Comment) != 0 {
 		sc.scrapePostBody(post, post.Reblog.Comment)
 	}
@@ -429,9 +450,52 @@ func (sc *scrapeContext) scrapePost(post *post) error {
 	for _, photo := range post.Photos {
 		sc.downloadFileAsync(post, photo.OriginalSize.URL)
 	}
-
 	if len(post.VideoURL) != 0 {
 		sc.downloadFileAsync(post, post.VideoURL)
+	}
+
+	return nil
+}
+
+func (sc *scrapeContext) scrapeNpfContent(post *post, cs []content) error {
+	for _, c := range cs {
+		if len(c.Media) == 0 {
+			continue
+		}
+
+		switch c.Type {
+		case "image":
+			var ms imageMedia
+			err := json.Unmarshal(c.Media, &ms)
+			if err != nil {
+				return err
+			}
+
+			bestURL := ms[0].URL
+			bestArea := ms[0].Width * ms[0].Height
+
+			for _, m := range ms {
+				if m.HasOriginalDimensions {
+					bestURL = m.URL
+					break
+				}
+				if m.Width*m.Height > bestArea {
+					bestURL = m.URL
+				}
+			}
+
+			sc.downloadFileAsync(post, bestURL)
+		case "video":
+			var ms videoMedia
+			err := json.Unmarshal(c.Media, &ms)
+			if err != nil {
+				return err
+			}
+
+			if strings.Contains(ms.URL, "tumblr.com") {
+				sc.downloadFileAsync(post, ms.URL)
+			}
+		}
 	}
 
 	return nil
@@ -467,7 +531,7 @@ func (sc *scrapeContext) scrapePostBody(post *post, text string) {
 
 		for _, attr := range node.Attr {
 			switch attr.Key {
-			case "href", "src":
+			case "href", "src", "data-big-photo":
 				if mediaURLRegexp.MatchString(attr.Val) {
 					sc.downloadFileAsync(post, attr.Val)
 				}
@@ -506,9 +570,13 @@ func (sc *scrapeContext) downloadFile(post *post, rawurl string) error {
 
 	// Ignore 404 errors
 	if err == errFileNotFound {
+		log.Printf("%s: did not find %s", sc.blogConfig.Name, rawurl)
 		err = nil
 	}
 
+	if err != nil {
+		log.Printf("%s: failed to download file: %v", sc.blogConfig.Name, err)
+	}
 	return err
 }
 
@@ -524,7 +592,7 @@ func (sc *scrapeContext) downloadFileMaybe(post *post, rawurl string) error {
 	// File already exists --> nothing to do here.
 	_, err = os.Lstat(path)
 	if err == nil {
-		//log.Printf("%s: skipping %s", sc.blogConfig.Name, path)
+		log.Printf("%s: skipping %s", sc.blogConfig.Name, path)
 		return nil
 	}
 
@@ -542,7 +610,8 @@ func (sc *scrapeContext) downloadFileMaybe(post *post, rawurl string) error {
 		// still be linked inside the posts but result in a "403 Forbidden" error.
 		return nil
 	case http.StatusNotFound:
-		log.Printf("%s: did not find %s", sc.blogConfig.Name, path)
+		return errFileNotFound
+	case http.StatusInternalServerError:
 		return errFileNotFound
 	default:
 		return fmt.Errorf("GET %s failed with: %d %s", rawurl, res.StatusCode, res.Status)
@@ -611,6 +680,7 @@ func (sc *scrapeContext) getAPIPostsURL() *url.URL {
 	vals := url.Values{
 		"api_key": {sc.scraper.config.APIKey},
 		"limit":   {"20"},
+		"npf":     {"true"},
 	}
 	if sc.allowedBlogs != nil {
 		vals.Set("reblog_info", "1")
@@ -638,6 +708,7 @@ func (sc *scrapeContext) getIndashBlogPostsURL() *url.URL {
 		"should_bypass_safemode_forblog": {"true"},
 		"should_bypass_tagfiltering":     {"true"},
 		"can_modify_safe_mode":           {"true"},
+		"npf":                            {"true"},
 	}.Encode()
 
 	return u

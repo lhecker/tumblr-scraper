@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/urfave/cli/v2"
 	"golang.org/x/net/publicsuffix"
-	"gopkg.in/urfave/cli.v2"
 )
 
 func New() *cli.App {
