@@ -99,6 +99,7 @@ type scrapeContextState int
 const (
 	scrapeContextStateTryUseAPI scrapeContextState = iota
 	scrapeContextStateUseAPI
+	scrapeContextStateTryUseIndashAPI
 	scrapeContextStateUseIndashAPI
 )
 
@@ -196,28 +197,23 @@ func (sc *scrapeContext) Scrape() (err error) {
 		if err != nil {
 			return
 		}
-
-		// Entries returned by Tumblr's paginated API can overlap between pages.
-		// I.e. specifying `&before=1491103082` might still randomly return entries with exactly such a timestamp.
-		// => Filter out redundant entries with post IDs we already scraped in previous iterations.
-		posts := []*post(nil)
-		for idx, post := range res.Response.Posts {
-			if post.ID < sc.lowestID {
-				posts = res.Response.Posts[idx:]
-				break
-			}
-		}
-
-		if len(posts) == 0 {
+		if len(res.Response.Posts) == 0 {
 			return
 		}
 
-		for _, post := range posts {
-			if post.ID < sc.lowestID {
-				sc.lowestID = post.ID
+		for _, post := range res.Response.Posts {
+			post.id, err = post.ID.Int64()
+			if err != nil {
+				return
 			}
-			if post.ID > sc.highestID {
-				sc.highestID = post.ID
+		}
+
+		for _, post := range res.Response.Posts {
+			if post.id < sc.lowestID {
+				sc.lowestID = post.id
+			}
+			if post.id > sc.highestID {
+				sc.highestID = post.id
 			}
 
 			timestamp := post.timestamp()
@@ -225,7 +221,7 @@ func (sc *scrapeContext) Scrape() (err error) {
 				sc.before = timestamp
 			}
 
-			if post.ID <= initialHighestID {
+			if post.id <= initialHighestID {
 				return
 			}
 
@@ -349,7 +345,7 @@ func (sc *scrapeContext) scrapeBlogMaybe() (*postsResponse, error) {
 	)
 
 	switch sc.state {
-	case scrapeContextStateUseIndashAPI:
+	case scrapeContextStateTryUseIndashAPI, scrapeContextStateUseIndashAPI:
 		url = sc.getIndashBlogPostsURL()
 		res, err = sc.doGetRequest(url, http.Header{
 			"Referer":          {"https://www.tumblr.com/dashboard"},
@@ -365,20 +361,19 @@ func (sc *scrapeContext) scrapeBlogMaybe() (*postsResponse, error) {
 	}
 	defer res.Body.Close()
 
-	switch {
-	case
-		res.StatusCode == http.StatusNotFound &&
-			sc.state == scrapeContextStateTryUseAPI &&
-			len(sc.scraper.config.Username) != 0:
-		// Retry using the indash_blog API (i.e. for non-public blogs)
-		err := account.LoginOnce()
-		if err != nil {
-			return nil, err
+	if res.StatusCode != http.StatusOK {
+		if sc.state == scrapeContextStateTryUseAPI && res.StatusCode == http.StatusNotFound && len(sc.scraper.config.Username) != 0 {
+			sc.state = scrapeContextStateTryUseIndashAPI
+			return nil, nil
 		}
-
-		sc.state = scrapeContextStateUseIndashAPI
-		return nil, nil
-	case res.StatusCode != http.StatusOK:
+		if sc.state == scrapeContextStateTryUseIndashAPI && res.StatusCode != http.StatusNotFound {
+			err := account.LoginOnce()
+			if err != nil {
+				return nil, err
+			}
+			sc.state = scrapeContextStateUseIndashAPI
+			return nil, nil
+		}
 		return nil, fmt.Errorf("GET %s failed with: %d %s", url, res.StatusCode, res.Status)
 	}
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/lhecker/tumblr-scraper/account"
 	"github.com/lhecker/tumblr-scraper/config"
+	"github.com/lhecker/tumblr-scraper/cookiejar"
 	"github.com/lhecker/tumblr-scraper/database"
 	"github.com/lhecker/tumblr-scraper/scraper"
 )
@@ -19,8 +20,7 @@ func newUpdateCommand() *cli.Command {
 }
 
 func handleUpdate(c *cli.Context) error {
-	ctx, cancel := terminationSignalContext()
-	defer cancel()
+	ctx := terminationSignalContext()
 
 	configPath := "tumblr.toml"
 	cfg, err := config.LoadConfigOrDefault(configPath)
@@ -33,14 +33,24 @@ func handleUpdate(c *cli.Context) error {
 		return err
 	}
 
-	httpClient := newHTTPClient()
+	cookieSnapshot, err := db.GetCookies()
+	if err != nil {
+		log.Printf("failed to get cookie snapshot: %v", err)
+	}
 
+	jar := cookiejar.New(cookieSnapshot)
+	if err != nil {
+		return err
+	}
 	defer func() {
-		err := account.Logout()
+		snapshot := jar.Snapshot()
+		err := db.SaveCookies(snapshot)
 		if err != nil {
-			log.Printf("failed to logout: %v", err)
+			log.Printf("failed to save cookies: %v", err)
 		}
 	}()
+
+	httpClient := newHTTPClient(jar)
 
 	if len(cfg.Username) != 0 {
 		account.Setup(httpClient, cfg)

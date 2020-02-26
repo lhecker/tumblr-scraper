@@ -7,6 +7,7 @@ import (
 )
 
 var (
+	stateBucket     = []byte("state")
 	highestIDBucket = []byte("highest_id")
 )
 
@@ -33,17 +34,45 @@ func (s *Database) Close() error {
 	return s.get().Close()
 }
 
+func (s *Database) GetCookies() (snapshot []byte, err error) {
+	err = s.get().Update(func(tx *bbolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists(stateBucket)
+		if err != nil {
+			return err
+		}
+
+		snapshot = b.Get([]byte("cookies"))
+		return nil
+	})
+	return
+}
+
+func (s *Database) SaveCookies(snapshot []byte) error {
+	return s.get().Update(func(tx *bbolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists(stateBucket)
+		if err != nil {
+			return err
+		}
+
+		return b.Put([]byte("cookies"), snapshot)
+	})
+}
+
 func (s *Database) GetHighestID(blogName string) (int64, error) {
 	var highestID int64
 
-	err := s.get().View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket(highestIDBucket).Get([]byte(blogName))
-		if b == nil {
+	err := s.get().Update(func(tx *bbolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists(highestIDBucket)
+		if err != nil {
+			return err
+		}
+
+		data := b.Get([]byte(blogName))
+		if len(data) == 0 {
 			return nil
 		}
 
-		var err error
-		highestID, err = strconv.ParseInt(string(b), 10, 64)
+		highestID, err = strconv.ParseInt(string(data), 10, 64)
 		return err
 	})
 	if err != nil {
@@ -55,8 +84,13 @@ func (s *Database) GetHighestID(blogName string) (int64, error) {
 
 func (s *Database) SetHighestID(blogName string, highestID int64) error {
 	return s.get().Update(func(tx *bbolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists(highestIDBucket)
+		if err != nil {
+			return err
+		}
+
 		s := strconv.FormatInt(highestID, 10)
-		return tx.Bucket(highestIDBucket).Put([]byte(blogName), []byte(s))
+		return b.Put([]byte(blogName), []byte(s))
 	})
 }
 

@@ -12,7 +12,9 @@ type postsResponse struct {
 }
 
 type post struct {
-	ID        int64        `json:"id"`
+	ID json.Number `json:"id"`
+	id int64
+
 	Timestamp int64        `json:"timestamp"`
 	Trail     []trailEntry `json:"trail"`
 

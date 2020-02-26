@@ -4,7 +4,6 @@ import (
 	"context"
 	"net"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"os/signal"
@@ -12,7 +11,8 @@ import (
 	"time"
 
 	"github.com/urfave/cli/v2"
-	"golang.org/x/net/publicsuffix"
+
+	"github.com/lhecker/tumblr-scraper/cookiejar"
 )
 
 func New() *cli.App {
@@ -24,7 +24,7 @@ func New() *cli.App {
 	}
 }
 
-func terminationSignalContext() (context.Context, context.CancelFunc) {
+func terminationSignalContext() context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	go func() {
@@ -34,29 +34,18 @@ func terminationSignalContext() (context.Context, context.CancelFunc) {
 		signal.Notify(ch, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGTERM)
 		defer signal.Stop(ch)
 
-		select {
-		case <-ch:
-		case <-ctx.Done():
-		}
+		<-ch
 	}()
 
-	return ctx, cancel
+	return ctx
 }
 
-func newHTTPClient() *http.Client {
-	jar, err := cookiejar.New(&cookiejar.Options{
-		PublicSuffixList: publicsuffix.List,
-	})
-	if err != nil {
-		panic(err)
-	}
-
+func newHTTPClient(jar *cookiejar.Jar) *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
 			DialContext: (&net.Dialer{
 				Timeout:   10 * time.Second,
 				KeepAlive: 60 * time.Second,
-				DualStack: true,
 			}).DialContext,
 			MaxIdleConns:          100,
 			IdleConnTimeout:       90 * time.Second,
