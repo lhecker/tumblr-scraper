@@ -225,10 +225,6 @@ func (sc *scrapeContext) Scrape() (err error) {
 				return
 			}
 
-			if !sc.handleReblogs(post) {
-				continue
-			}
-
 			err = sc.scrapePost(post)
 			if err != nil {
 				return
@@ -400,9 +396,15 @@ func (sc *scrapeContext) scrapePost(post *post) error {
 	// Scraping logic for NPF posts
 	//
 
+	// As far as I can see the "content" field for NPF posts never contains reblog content.
+	// That
 	err := sc.scrapeNpfContent(post, post.Content)
 	if err != nil {
 		return err
+	}
+
+	if !sc.handleReblogs(post) {
+		return nil
 	}
 
 	for _, t := range post.Trail {
