@@ -258,19 +258,17 @@ func (sc *scrapeContext) handleReblogs(post *post) bool {
 	if len(post.RebloggedFromName) != 0 {
 		return sc.handleReblogsUsingName(post, post.RebloggedFromName)
 	}
+	if len(post.PostAuthor) != 0 {
+		return sc.isBlogAllowed(post.PostAuthor)
+	}
 
 	return true
 }
 
 func (sc *scrapeContext) handleReblogsUsingName(post *post, name string) bool {
-	if deactivatedNameRegexp.MatchString(name) {
-		name = name[0 : len(name)-deactivatedNameSuffixLength]
-	}
-
 	if !sc.isBlogAllowed(name) {
 		return false
 	}
-
 	sc.filterReblogsFromBody(post)
 	return true
 }
@@ -286,7 +284,7 @@ func (sc *scrapeContext) handleReblogsUsingTrail(post *post) (bool, bool) {
 	if root == nil {
 		return false, false
 	}
-	if !sc.isBlogAllowed(config.TumblrNameToDomain(root.Blog.Name)) {
+	if !sc.isBlogAllowed(root.Blog.Name) {
 		return false, true
 	}
 
@@ -303,7 +301,7 @@ func (sc *scrapeContext) filterReblogsFromBody(post *post) {
 	body := strings.Builder{}
 
 	for _, entry := range post.Trail {
-		if !sc.isBlogAllowed(config.TumblrNameToDomain(entry.Blog.Name)) {
+		if !sc.isBlogAllowed(entry.Blog.Name) {
 			continue
 		}
 		if len(entry.ContentRaw) == 0 {
@@ -316,6 +314,9 @@ func (sc *scrapeContext) filterReblogsFromBody(post *post) {
 }
 
 func (sc *scrapeContext) isBlogAllowed(name string) bool {
+	if deactivatedNameRegexp.MatchString(name) {
+		name = name[0 : len(name)-deactivatedNameSuffixLength]
+	}
 	_, ok := sc.allowedBlogs[config.TumblrNameToDomain(name)]
 	return ok
 }
@@ -396,15 +397,14 @@ func (sc *scrapeContext) scrapePost(post *post) error {
 	// Scraping logic for NPF posts
 	//
 
-	// As far as I can see the "content" field for NPF posts never contains reblog content.
-	// That
-	err := sc.scrapeNpfContent(post, post.Content)
-	if err != nil {
-		return err
-	}
-
 	if !sc.handleReblogs(post) {
 		return nil
+	}
+
+	// As far as I can see the "content" field for NPF posts never contains reblog content.
+	err := sc.scrapeNpfContent(post, post.Content, post.Layout)
+	if err != nil {
+		return err
 	}
 
 	for _, t := range post.Trail {
@@ -412,18 +412,11 @@ func (sc *scrapeContext) scrapePost(post *post) error {
 		if len(t.Blog.Name) != 0 {
 			name = t.Blog.Name
 		}
-
 		if !sc.isBlogAllowed(name) {
 			continue
 		}
 
-		var cs []content
-		err = json.Unmarshal(t.Content, &cs)
-		if err != nil {
-			continue
-		}
-
-		err = sc.scrapeNpfContent(post, cs)
+		err = sc.scrapeNpfContent(post, t.Content, t.Layout)
 		if err != nil {
 			return err
 		}
@@ -454,7 +447,16 @@ func (sc *scrapeContext) scrapePost(post *post) error {
 	return nil
 }
 
-func (sc *scrapeContext) scrapeNpfContent(post *post, cs []content) error {
+func (sc *scrapeContext) scrapeNpfContent(post *post, cs []content, ls []layout) error {
+	// Treat NPF asks like regular reblogs: Keep only those that are allowed.
+	for _, l := range ls {
+		if l.Type == "ask" && len(l.Attribution.URL) != 0 && !sc.isBlogAllowed(l.Attribution.URL) {
+			for _, i := range l.Blocks {
+				cs[i] = content{}
+			}
+		}
+	}
+
 	for _, c := range cs {
 		if len(c.Media) == 0 {
 			continue

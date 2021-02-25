@@ -146,8 +146,8 @@ func TumblrDomainToName(domain string) string {
 }
 
 func TumblrNameToDomain(name string) string {
-	if strings.ContainsRune(name, '.') {
-		return name
-	}
+	name = strings.TrimPrefix(name, "https://")
+	name = strings.TrimSuffix(name, "/")
+	name = TumblrDomainToName(name)
 	return name + ".tumblr.com"
 }

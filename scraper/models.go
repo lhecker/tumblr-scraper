@@ -19,7 +19,9 @@ type post struct {
 	Trail     []trailEntry `json:"trail"`
 
 	// NPF content: https://www.tumblr.com/docs/npf
-	Content []content `json:"content"`
+	Content    []content `json:"content"`
+	Layout     []layout  `json:"layout"`
+	PostAuthor string    `json:"post_author"`
 
 	// Compatibility with the private API used by Tumblr's Dashboard
 	Body     string  `json:"body"`
@@ -53,10 +55,14 @@ type trailEntry struct {
 	Blog struct {
 		Name string `json:"name"`
 	} `json:"blog"`
-	BrokenBlogName string          `json:"broken_blog_name"`
-	Content        json.RawMessage `json:"content"`
-	ContentRaw     string          `json:"content_raw"`
-	IsRootItem     *bool           `json:"is_root_item"`
+	BrokenBlogName string `json:"broken_blog_name"`
+
+	// NPF content: https://www.tumblr.com/docs/npf
+	Content []content `json:"content"`
+	Layout  []layout  `json:"layout"`
+
+	ContentRaw string `json:"content_raw"`
+	IsRootItem *bool  `json:"is_root_item"`
 }
 
 type content struct {
@@ -73,4 +79,12 @@ type imageMedia []struct {
 
 type videoMedia struct {
 	URL string `json:"url"`
+}
+
+type layout struct {
+	Type        string `json:"type"`
+	Blocks      []int  `json:"blocks"`
+	Attribution struct {
+		URL string `json:"url"`
+	} `json:"attribution"`
 }
