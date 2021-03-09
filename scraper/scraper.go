@@ -382,6 +382,7 @@ func (sc *scrapeContext) scrapeBlogMaybe() (*postsResponse, error) {
 	data := &postsResponse{}
 	err = json.Unmarshal(body, data)
 	if err != nil {
+		log.Printf("response: %s", string(body))
 		return nil, err
 	}
 
@@ -412,11 +413,17 @@ func (sc *scrapeContext) scrapePost(post *post) error {
 		if len(t.Blog.Name) != 0 {
 			name = t.Blog.Name
 		}
-		if !sc.isBlogAllowed(name) {
+		if !sc.isBlogAllowed(name) || len(t.Layout) == 0 {
 			continue
 		}
 
-		err = sc.scrapeNpfContent(post, t.Content, t.Layout)
+		var content []content
+		err = json.Unmarshal(t.Content, &content)
+		if err != nil {
+			return err
+		}
+
+		err = sc.scrapeNpfContent(post, content, t.Layout)
 		if err != nil {
 			return err
 		}

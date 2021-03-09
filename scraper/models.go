@@ -57,9 +57,10 @@ type trailEntry struct {
 	} `json:"blog"`
 	BrokenBlogName string `json:"broken_blog_name"`
 
-	// NPF content: https://www.tumblr.com/docs/npf
-	Content []content `json:"content"`
-	Layout  []layout  `json:"layout"`
+	// Sometimes NPF content: https://www.tumblr.com/docs/npf
+	// Sometimes Layout is missing and Content is a string
+	Content json.RawMessage `json:"content"`
+	Layout  []layout        `json:"layout"`
 
 	ContentRaw string `json:"content_raw"`
 	IsRootItem *bool  `json:"is_root_item"`
